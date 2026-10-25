@@ -1,133 +1,15 @@
-// Zero-dependency server: static files from public/, JSON API from the
-// `routes` table below. No npm install needed, so the first build is fast.
-// Add express later if you actually need it.
-const http = require('http');
-const fs = require('fs');
-const path = require('path');
-
-const PORT = process.env.PORT || 3000;
-const PUBLIC = path.join(__dirname, 'public');
-
-const MIME = {
-  '.html': 'text/html; charset=utf-8', '.css': 'text/css', '.js': 'text/javascript',
-  '.json': 'application/json', '.svg': 'image/svg+xml', '.png': 'image/png',
-  '.jpg': 'image/jpeg', '.jpeg': 'image/jpeg', '.gif': 'image/gif', '.webp': 'image/webp',
-  '.ico': 'image/x-icon', '.woff2': 'font/woff2', '.txt': 'text/plain; charset=utf-8',
-};
-
-// ── API routes ────────────────────────────────────────────────────────
-// Key is "METHOD /path". Handlers get (req, res) and may be async.
-// Anything not matched here falls through to the static files in public/.
-//
-//   const store = require('./lib/store');
-//   'GET /api/items':  (req, res) => json(res, store.read('items')),
-//   'POST /api/items': async (req, res) => {
-//     const item = await readBody(req);
-//     json(res, store.write('items', [...store.read('items'), item]), 201);
-//   },
-const routes = {
-  'GET /health': (req, res) => json(res, { status: 'ok', uptime: process.uptime() }),
-};
-
-function json(res, data, status = 200) {
-  const payload = JSON.stringify(data);
-  res.writeHead(status, {
-    'Content-Type': 'application/json',
-    'Content-Length': Buffer.byteLength(payload),
-  });
-  res.end(payload);
-}
-
-// Big enough for a phone photo sent as base64 JSON (a 5 MB photo is ~7 MB
-// encoded); still a cap, so one bad request can't exhaust memory. Shrink
-// photos in the browser before upload (public/shrink-photo.js) rather than
-// raising this.
-const MAX_BODY_BYTES = 10 * 1024 * 1024;
-
-/** Parse a JSON request body: `const data = await readBody(req)`. */
-function readBody(req) {
-  return new Promise((resolve, reject) => {
-    let raw = '';
-    let tooLarge = false;
-    // Decode as a stream: per-chunk decoding splits a multi-byte character
-    // (any non-English text) that straddles two chunks into garbage.
-    req.setEncoding('utf8');
-    req.on('data', (chunk) => {
-      if (tooLarge) return;
-      raw += chunk;
-      if (raw.length > MAX_BODY_BYTES) {
-        // Reject with a status instead of destroying the socket: a dropped
-        // connection reaches the person as a vague "could not post", a 413
-        // lets the page say the file is too big.
-        tooLarge = true;
-        raw = '';
-        reject(Object.assign(new Error('Body too large'), { status: 413 }));
-      }
-    });
-    req.on('end', () => {
-      if (tooLarge) return;
-      try { resolve(raw ? JSON.parse(raw) : {}); }
-      catch { reject(Object.assign(new Error('Invalid JSON body'), { status: 400 })); }
-    });
-    req.on('error', reject);
-  });
-}
-
-function sendFile(res, file, data) {
-  res.writeHead(200, { 'Content-Type': MIME[path.extname(file)] || 'application/octet-stream' });
-  res.end(data);
-}
-
-/**
- * Decode a URL path, or null when the client sent broken percent-encoding.
- *
- * decodeURIComponent THROWS on a malformed escape ('/%E0%A4%A'), and any
- * crawler or fuzzer sends those eventually. Unhandled, it took the whole app
- * down: one bad URL, process exits, the user's site is dead until something
- * restarts it. A truncated escape is a bad request, not a server fault, so it
- * gets a 400 and the server stays up.
- */
-function safeDecode(pathname) {
-  try {
-    return decodeURIComponent(pathname);
-  } catch {
-    return null;
-  }
-}
-
-function serveStatic(req, res, pathname) {
-  const decoded = pathname === '/' ? 'index.html' : safeDecode(pathname);
-  if (decoded === null) return json(res, { error: 'Bad request' }, 400);
-  const rel = decoded.replace(/^\/+/, '');
-  const file = path.join(PUBLIC, rel);
-  // Keep resolved paths inside public/ so `..` can't escape the web root.
-  if (file !== PUBLIC && !file.startsWith(PUBLIC + path.sep)) return json(res, { error: 'Not found' }, 404);
-
-  fs.readFile(file, (err, data) => {
-    if (!err) return sendFile(res, file, data);
-    // Extensionless miss = a client-side route; hand back the entry page.
-    if (path.extname(rel)) return json(res, { error: 'Not found' }, 404);
-    const entry = path.join(PUBLIC, 'index.html');
-    fs.readFile(entry, (e, html) => (e ? json(res, { error: 'Not found' }, 404) : sendFile(res, entry, html)));
-  });
-}
-
-http.createServer(async (req, res) => {
-  // EVERY path is inside the try, including static files. It used to early-
-  // return into serveStatic before the boundary, so anything that threw there
-  // was an uncaught exception and killed the process instead of failing one
-  // request.
-  let pathname = req.url || '/';
-  try {
-    ({ pathname } = new URL(req.url, `http://${req.headers.host || 'localhost'}`));
-    const handler = routes[`${req.method} ${pathname}`];
-    if (handler) await handler(req, res);
-    else serveStatic(req, res, pathname);
-  } catch (err) {
-    console.error(`${req.method} ${pathname} failed:`, err.message);
-    if (res.headersSent) return;
-    if (err.status === 413) json(res, { error: 'Too large: the limit is 10 MB. Try a smaller photo.' }, 413);
-    else if (err.status === 400) json(res, { error: err.message }, 400);
-    else json(res, { error: 'Server error' }, 500);
-  }
-}).listen(PORT, () => console.log(`Listening on port ${PORT}`));
+const http=require('http'),fs=require('fs'),path=require('path'),crypto=require('crypto');
+const store=require('./lib/store');
+const PORT=process.env.PORT, PUBLIC=path.join(__dirname,'public');
+const MIME={'.html':'text/html; charset=utf-8','.css':'text/css','.js':'text/javascript','.json':'application/json','.svg':'image/svg+xml','.png':'image/png','.jpg':'image/jpeg','.jpeg':'image/jpeg','.webp':'image/webp'};
+const json=(res,data,status=200)=>{const p=JSON.stringify(data);res.writeHead(status,{'Content-Type':'application/json','Content-Length':Buffer.byteLength(p)});res.end(p)};
+const body=req=>new Promise((resolve,reject)=>{let raw='';req.setEncoding('utf8');req.on('data',c=>{raw+=c;if(raw.length>1e6)reject(Object.assign(Error('Request too large'),{status:413}))});req.on('end',()=>{try{resolve(raw?JSON.parse(raw):{})}catch{reject(Object.assign(Error('Invalid JSON'),{status:400}))}});req.on('error',reject)});
+const hash=p=>crypto.scryptSync(p,'sunshine-trust-v1',32).toString('hex');const accounts=()=>store.read('accounts',[]);const sessions=()=>store.read('sessions',[]);const clean=a=>({id:a.id,name:a.name,email:a.email,username:a.username,role:a.role,balance:a.balance,createdAt:a.createdAt});
+function token(req){return (req.headers.authorization||'').replace(/^Bearer\s+/,'')}function current(req){const s=sessions().find(x=>x.token===token(req));return s&&accounts().find(a=>a.id===s.userId)}function requireUser(req,res){const a=current(req);if(!a){json(res,{error:'Sign in required'},401);return null}return a}function saveAccounts(a){store.write('accounts',a)}
+async function signup(req,res){const d=await body(req),list=accounts(),invite=d.invite&&store.read('invites',[]).find(i=>i.code===d.invite&&!i.used);if(!d.name||!d.email||!d.username||!d.password)return json(res,{error:'Complete every field'},400);if(list.some(a=>a.email.toLowerCase()===d.email.toLowerCase()||a.username.toLowerCase()===d.username.toLowerCase()))return json(res,{error:'That email or username is already in use'},409);const role=list.length===0?'admin':invite?'user':null;if(!role)return json(res,{error:'Customer sign-up requires an invitation link'},403);const a={id:crypto.randomUUID(),name:d.name,email:d.email,username:d.username,password:hash(d.password),role,balance:role==='admin'?8240.60:0,createdAt:new Date().toISOString(),transactions:[]};list.push(a);saveAccounts(list);if(invite){const inv=store.read('invites',[]);inv.find(i=>i.code===invite.code).used=true;store.write('invites',inv)}const t=crypto.randomBytes(32).toString('hex');store.write('sessions',[...sessions(),{token:t,userId:a.id}]);json(res,{token:t,user:clean(a)},201)}
+async function login(req,res){const d=await body(req),a=accounts().find(x=>(x.email.toLowerCase()===String(d.id).toLowerCase()||x.username.toLowerCase()===String(d.id).toLowerCase())&&x.password===hash(d.password));if(!a)return json(res,{error:'Invalid sign-in details'},401);const t=crypto.randomBytes(32).toString('hex');store.write('sessions',[...sessions().filter(s=>s.userId!==a.id),{token:t,userId:a.id}]);json(res,{token:t,user:clean(a)})}
+async function invite(req,res){const a=requireUser(req,res);if(!a)return;if(a.role!=='admin')return json(res,{error:'Admin access required'},403);const code=crypto.randomBytes(18).toString('base64url'),all=store.read('invites',[]);all.push({code,createdBy:a.id,used:false,createdAt:new Date().toISOString()});store.write('invites',all);json(res,{link:`/invite/${code}`},201)}
+async function transfer(req,res){const from=requireUser(req,res);if(!from)return;const d=await body(req),amount=Number(d.amount),list=accounts(),to=list.find(a=>a.username.toLowerCase()===String(d.recipient).replace(/^@/,'').toLowerCase());if(!to||to.id===from.id)return json(res,{error:'Choose another Sunshine Trust user by username'},400);if(!amount||amount<=0||amount>from.balance)return json(res,{error:'Enter an available amount'},400);from.balance-=amount;to.balance+=amount;const when=new Date().toISOString();from.transactions.unshift({id:crypto.randomUUID(),name:to.name,amount:-amount,status:'Completed',note:d.note||'Sunshine Trust transfer',when,counterparty:to.username});to.transactions.unshift({id:crypto.randomUUID(),name:from.name,amount, status:'Completed',note:d.note||'Sunshine Trust transfer',when,counterparty:from.username});saveAccounts(list);json(res,{balance:from.balance,transaction:from.transactions[0]})}
+const routes={'GET /health':(q,r)=>json(r,{status:'ok'}),'POST /api/auth/signup':signup,'POST /api/auth/login':login,'GET /api/me':(q,r)=>{const a=requireUser(q,r);if(a)json(r,{user:clean(a),transactions:a.transactions})},'POST /api/invites':invite,'POST /api/transfers/internal':transfer};
+function staticFile(req,res,p){const rel=(p==='/'?'index.html':decodeURIComponent(p).replace(/^\/+/,'')),file=path.join(PUBLIC,rel);if(!file.startsWith(PUBLIC))return json(res,{error:'Not found'},404);fs.readFile(file,(e,d)=>{if(e){if(path.extname(rel))return json(res,{error:'Not found'},404);return fs.readFile(path.join(PUBLIC,'index.html'),(x,h)=>x?json(res,{error:'Not found'},404):send(res,'index.html',h))}send(res,file,d)})}function send(res,file,data){res.writeHead(200,{'Content-Type':MIME[path.extname(file)]||'application/octet-stream'});res.end(data)}
+http.createServer(async(req,res)=>{let p='/';try{p=new URL(req.url,`http://${req.headers.host}`).pathname;const h=routes[`${req.method} ${p}`];h?await h(req,res):staticFile(req,res,p)}catch(e){json(res,{error:e.message||'Server error'},e.status||500)}}).listen(PORT,'0.0.0.0',()=>console.log(`Listening on ${PORT}`));
