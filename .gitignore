@@ -26,3 +26,13 @@ qa-reports/
 .vk-write-*
 .vktmp-*
 *.vktmp-*
+
+# Native app (Expo)
+.expo/
+dist/
+dist-export/
+web-build/
+expo-env.d.ts
+/ios
+/android
+lib/data/

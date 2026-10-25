@@ -1,78 +1,79 @@
-# Template: Mobile
+# Template: Native app (Expo)
 
-An installable phone app. Zero dependencies, so it boots with no `npm install`.
-It is a shell to build ON, not a placeholder to delete.
+A real phone app, written in React Native with Expo. The user runs it on their
+own phone in the free **Expo Go** app, and the same code is also a website at
+this app's address. It is a working app to build ON, not a placeholder.
 
 ## What's already built and wired (do NOT rebuild it)
 
 ```
-server.js          zero-dep HTTP server: static files + JSON API + /health
-lib/store.js       durable JSON storage, atomic writes (temp file + rename)
-public/index.html  app bar + 3 tab screens + bottom tab bar
-public/styles.css  design tokens — edit :root, don't re-invent a palette
-public/app.js      tab switching, install prompt, service worker registration
-public/sw.js       offline fallback ONLY (read the warning below)
-public/shrink-photo.js  shrinkPhoto(file): a photo small enough to upload; use it on every photo
+app/_layout.tsx   the app's frame (Expo Router: every file in app/ is a screen)
+app/index.tsx     the first screen: a working list that loads and saves through the server
+components/WakingScreen.tsx  what the app shows while its server wakes up (see below)
+lib/api.ts        how every screen talks to the server (use it, never bare fetch)
+server.js         the app's server: your JSON API, the phone updates, the website
+lib/store.js      durable JSON storage for the server, atomic writes
+lib/auth.js       accounts for the app's users: sign up, log in, session tokens
+lib/shrink-photo.ts  shrinkPhoto(uri): a photo small enough to upload (add expo-image-manipulator first)
+app.json          the app's name, icon and settings
+package.json      dependencies and the platform's build marker (do not remove it)
 ```
 
-- **This app installs to the home screen, and you do NOT wire that up.** The
-  platform injects the manifest, the app icon, `theme-color` and the
-  `apple-mobile-web-app-*` tags at the proxy, built from this app's real name
-  with its own generated icon. **Never add a `<link rel="manifest">` or a
-  `manifest.json`**: the platform steps aside the moment a page declares one,
-  so a static manifest would replace the user's real app name and icon with a
-  hardcoded placeholder on every install. Renaming the app is enough; the
-  home-screen label follows automatically.
-- **NEVER make the service worker cache CSS, JS or API responses.** This app is
-  redeployed on every change, and a caching worker would serve the old build to
-  a user who just asked for a new one. `public/sw.js` is deliberately
-  network-first with a single offline fallback. Leave it that way.
-- **Add screens as `<section class="screen">` plus a `.tab` button** with a
-  matching `data-screen`. `app.js` wires them automatically, there is no router
-  to touch. Three tabs is a starting point, not a rule: rename them to whatever
-  the app is actually about.
-- **Keep navigation in the bottom tab bar.** It is thumb-reachable, which is why
-  phone apps put it there. Don't replace it with a hamburger or a top nav.
-- **No dependencies, no `npm install`.** Keep it that way unless the app
-  genuinely needs a package; every dependency costs the user an install on every
-  build.
-- **Add API routes to the `routes` table in `server.js`** (`'GET /api/items'`).
-  There is a worked example in the comment above it.
-- **Persist with `lib/store.js`**, don't hand-roll `fs.writeFileSync` — a
-  non-atomic write corrupts the user's data when a container restarts mid-write.
-- `/health` exists and the platform uses it. Don't remove it.
+## How this app gets to the phone
 
-## Built for the home screen
+- **You never build or run it here.** Never run `expo start`, `expo run`,
+  `npm install`, `npx expo install` or `expo export` in this workspace. There
+  are no `node_modules` here on purpose. The platform installs and builds on
+  **Deploy** (about a minute), then the phone picks up the new version.
+- **Every turn that changes the app publishes itself.** Right after your reply
+  the platform deploys what you changed (the first build and every edit after
+  it), and once it is live it tells them to close and reopen the app in Expo
+  Go. So end with what you changed, and never tell them to tap Deploy or to
+  wait for "the next deploy". Deploy yourself only when they ask.
+- **The platform hands them the phone link.** Its first-build message carries
+  it (a page that opens the free Expo Go app, or helps install it), so don't
+  repeat it in your reply; if they ask later, it is in AGENTS.md.
+- **What you can verify:** the website (a screenshot of this app's address
+  shows the same screens). You cannot see the phone; the user checks it in
+  Expo Go.
 
-People use this app from an icon on their phone, not a browser tab. That
-changes three things:
+## Platform contracts (do not change)
 
-- **There is no browser back button.** Installed, the app opens full screen
-  with no browser bar at all, so every screen you add needs its own way back
-  (a tab, a back arrow in the app bar, a close button on a sheet). A screen
-  with no exit is a dead end on a real phone.
-- **The platform shows the install hint, not you.** On an iPhone the platform
-  puts an "Add to your home screen" banner over the page and explains
-  Share, then Add to Home Screen. Do not build your own install banner,
-  modal or instructions; the Install card in `index.html` only serves
-  Android's real install prompt.
-- **Say how to install it ONCE, at the first build.** One line in your reply:
-  open the link in Safari, tap Share, then Add to Home Screen. After that,
-  only if they ask.
+- `package.json` `"vibekit": {"build": "expo"}` and the `build` script. They
+  are how the platform knows to build this as a phone app.
+- `server.js`'s `/.vibekit/expo/*` handling, `currentRelease()` and `/health`.
+  Expo Go loads the app from there; `/health` is how the platform knows the
+  server is up.
+- `lib/api.ts`'s `Accept: application/json` header and its waking retry, and
+  the waking screen in `app/_layout.tsx` (`components/WakingScreen.tsx`). When
+  nobody has used the app for a while its server sleeps, and waking takes up
+  to a minute; `api()` waits that out while the frame covers every screen with
+  the platform's waking message, then removes it the moment the server
+  answers. Screens need nothing for it. Restyle `WakingScreen` to match the
+  app if you like, but keep what it shows. Bare `fetch` would fail instead.
+- `dist/` belongs to the platform (each build lands in `dist/releases/`).
+  Never write into it.
+
+## Adding a package
+
+Only packages that run in Expo Go work, and the lockfile must match, so never
+edit `package.json` dependencies by hand. Ask the platform to add one (see
+TOOLS.md). A hand edit fails the next Deploy with "use the deps action".
 
 ## Where things go
 
 | Adding | Put it in |
 |---|---|
-| A screen | a `<section class="screen">` + a `.tab` button in `public/index.html` |
+| A screen | a new file in `app/` (`app/settings.tsx` is `/settings`) |
+| Talking to the server | `api()` from `lib/api.ts` |
 | An API endpoint | the `routes` table in `server.js` |
-| Saved data | `lib/store.js` via `store.read` / `store.write` |
-| Styling | `public/styles.css` (tokens first) |
-| The app's name/icon | nothing to edit — the platform derives both from the app's name |
-| Shared logic | a new file in `lib/` |
+| Saved data | `lib/store.js` via `store.read` / `store.write`, in `server.js` |
+| Accounts | the `/api/auth/*` routes (already there) and `auth.userFor(req)` |
+| A secret or API key | `process.env` in `server.js` only; screens ship inside the app |
+| AI (a chat, a coach, a writer) | a `server.js` route that calls the built-in model (TOOLS.md §Runtime AI); screens call that route |
+| An icon | `@expo/vector-icons`, one set per import: `import Ionicons from '@expo/vector-icons/Ionicons'` |
+| Something to tap | a `Pressable` with `accessibilityRole="button"` (or `"link"`), plus `accessibilityLabel` when it shows only an icon. Without a role it is a plain box to VoiceOver and to the platform's page checks, which then find nothing to tap |
+| The app's name and icon | `app.json` (`expo.name`, `expo.icon`) |
 
-## Safe areas
-
-`index.html` ships `viewport-fit=cover` and the CSS pads with
-`env(safe-area-inset-*)`. Any new fixed-position element must respect those
-insets or it will sit under the notch or the home indicator on a real phone.
+`lib/*.js` files run on the server (Node); `.ts`/`.tsx` files run on the phone
+and in the browser. Never import a server file from a screen.
