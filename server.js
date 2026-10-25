@@ -70,7 +70,7 @@ const routes = {
  'POST /api/auth/logout': (req,res)=>{store.write('sessions',sessions().filter(s=>s.token!==bearer(req)));json(res,{ok:true});},
  'GET /api/auth/me': (req,res)=>{const a=requireUser(req,res);if(a)json(res,{user:publicUser(a),transactions:txOf(a.id).slice(0,MAX_TRANSACTIONS_PER_REQUEST)});},
  'POST /api/transfers/internal': transfer,
- 'POST /api/invites': async (req,res)=>{const a=requireUser(req,res);if(!a)return;if(a.role!=='admin')return json(res,{error:'Admin access required'},403);const code=crypto.randomBytes(18).toString('base64url'),all=store.read('invites',[]);all.push({code,createdBy:a.id,used:false,createdAt:new Date().toISOString()});store.write('invites',all);json(res,{link:'/invite/'+code},201);},
+ 'POST /api/invites': async (req,res)=>{const a=requireUser(req,res);if(!a)return;if(a.role!=='admin')return json(res,{error:'Admin access required'},403);const code=crypto.randomBytes(18).toString('base64url'),all=store.read('invites',[]);all.push({code,createdBy:a.id,used:false,createdAt:new Date().toISOString()});store.write('invites',all);json(res,{link:'/?invite='+code},201);},
 };
 
 function json(res, data, status = 200, headers = {}) {
